@@ -1,0 +1,26 @@
+#!/bin/bash
+set -e
+
+# Compile GSettings schemas
+if command -v glib-compile-schemas >/dev/null 2>&1; then
+    glib-compile-schemas /usr/share/glib-2.0/schemas/ || true
+fi
+
+# Enable the extension for the current user
+if command -v gnome-extensions >/dev/null 2>&1; then
+    # Run as the logged-in user, not as root
+    LOGGED_USER=$(logname 2>/dev/null || echo "")
+    if [ -n "$LOGGED_USER" ]; then
+        su - "$LOGGED_USER" -c "gnome-extensions enable netspeed-indicator@vzk" 2>/dev/null || true
+    fi
+fi
+
+echo ""
+echo "============================================="
+echo "  Net Speed Indicator installed!"
+echo "  Please log out and log back in, or run:"
+echo "    gnome-extensions enable netspeed-indicator@vzk"
+echo "  Then press Alt+F2, type 'r', press Enter"
+echo "  (on X11) or log out/in (on Wayland)."
+echo "============================================="
+echo ""

@@ -1,0 +1,9 @@
+{
+  "name": "Net Speed Indicator",
+  "description": "Shows real-time network speed and tracks data usage in the top bar",
+  "uuid": "netspeed-indicator@vzk",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "version": 1,
+  "url": "https://github.com/vzk/netspeed-indicator",
+  "settings-schema": "org.gnome.shell.extensions.netspeed-indicator"
+}

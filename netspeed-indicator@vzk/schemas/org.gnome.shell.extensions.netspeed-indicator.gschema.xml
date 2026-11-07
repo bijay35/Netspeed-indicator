@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.netspeed-indicator"
+          path="/org/gnome/shell/extensions/netspeed-indicator/">
+
+    <key name="refresh-interval" type="i">
+      <default>1</default>
+      <summary>Refresh interval in seconds</summary>
+    </key>
+
+    <key name="speed-unit" type="s">
+      <default>'adaptive'</default>
+      <summary>Speed display unit</summary>
+      <description>Options: 'kbps', 'mbps', 'adaptive'</description>
+    </key>
+
+    <key name="show-upload" type="b">
+      <default>true</default>
+      <summary>Show upload speed</summary>
+    </key>
+
+    <key name="show-download" type="b">
+      <default>true</default>
+      <summary>Show download speed</summary>
+    </key>
+
+    <key name="show-total-data" type="b">
+      <default>true</default>
+      <summary>Show total data used in menu</summary>
+    </key>
+
+    <key name="total-bytes-downloaded" type="x">
+      <default>0</default>
+      <summary>Total bytes downloaded (tracked)</summary>
+    </key>
+
+    <key name="total-bytes-uploaded" type="x">
+      <default>0</default>
+      <summary>Total bytes uploaded (tracked)</summary>
+    </key>
+
+    <key name="tracking-start-date" type="s">
+      <default>''</default>
+      <summary>Date when data tracking started</summary>
+    </key>
+
+    <key name="monthly-reset" type="b">
+      <default>true</default>
+      <summary>Auto-reset data usage monthly</summary>
+    </key>
+
+    <key name="reset-day" type="i">
+      <default>1</default>
+      <summary>Day of month to reset data usage</summary>
+    </key>
+
+  </schema>
+</schemalist>

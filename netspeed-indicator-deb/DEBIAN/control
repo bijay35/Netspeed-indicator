@@ -1,0 +1,14 @@
+Package: gnome-shell-extension-netspeed-indicator
+Version: 1.0.0
+Section: gnome
+Priority: optional
+Architecture: all
+Depends: gnome-shell (>= 45)
+Maintainer: vzk <vzk@localhost>
+Description: Net Speed Indicator - GNOME Shell Extension
+ Shows real-time network upload/download speed in the top bar
+ beside the WiFi icon. Features include:
+  - Real-time upload and download speed display
+  - Configurable units (KB/s, MB/s, or adaptive)
+  - Data usage tracking with monthly auto-reset
+  - Preferences dialog for customization
