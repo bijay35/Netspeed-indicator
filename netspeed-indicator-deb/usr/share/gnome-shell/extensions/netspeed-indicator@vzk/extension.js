@@ -3,6 +3,7 @@ import Gio from 'gi://Gio';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 import GObject from 'gi://GObject';
+import Soup from 'gi://Soup?version=3.0';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -19,6 +20,8 @@ class NetSpeedIndicator extends PanelMenu.Button {
         this._prevRxBytes = 0;
         this._prevTxBytes = 0;
         this._prevTime = 0;
+        this._soupSession = null;
+        this._weatherText = '';
 
         // Top bar layout
         this._box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
@@ -30,6 +33,14 @@ class NetSpeedIndicator extends PanelMenu.Button {
             style: 'font-size: 11px; font-weight: bold; margin-left: 4px;',
         });
         this._box.add_child(this._label);
+
+        // Weather label in the panel
+        this._weatherLabel = new St.Label({
+            text: '',
+            y_align: Clutter.ActorAlign.CENTER,
+            style: 'font-size: 11px; margin-left: 8px;',
+        });
+        this._box.add_child(this._weatherLabel);
         this.add_child(this._box);
 
         // Dropdown menu items
@@ -59,6 +70,25 @@ class NetSpeedIndicator extends PanelMenu.Button {
         this._trackingSinceItem = new PopupMenu.PopupMenuItem('Since: ---');
         this._trackingSinceItem.sensitive = false;
         this.menu.addMenuItem(this._trackingSinceItem);
+
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        // Weather section
+        this._weatherHeaderItem = new PopupMenu.PopupMenuItem('Weather: ---');
+        this._weatherHeaderItem.sensitive = false;
+        this.menu.addMenuItem(this._weatherHeaderItem);
+
+        this._weatherTempItem = new PopupMenu.PopupMenuItem('Temperature: ---');
+        this._weatherTempItem.sensitive = false;
+        this.menu.addMenuItem(this._weatherTempItem);
+
+        this._weatherCondItem = new PopupMenu.PopupMenuItem('Condition: ---');
+        this._weatherCondItem.sensitive = false;
+        this.menu.addMenuItem(this._weatherCondItem);
+
+        this._weatherHumidityItem = new PopupMenu.PopupMenuItem('Humidity: ---');
+        this._weatherHumidityItem.sensitive = false;
+        this.menu.addMenuItem(this._weatherHumidityItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
@@ -111,6 +141,33 @@ class NetSpeedIndicator extends PanelMenu.Button {
             this._updateUnitMarkers();
         });
         this._updateUnitMarkers();
+
+        // Weather setup
+        this._updateWeatherVisibility();
+        this._weatherSettingsIds = [
+            this._settings.connect('changed::show-weather', () => {
+                this._updateWeatherVisibility();
+                if (this._settings.get_boolean('show-weather'))
+                    this._fetchWeather();
+            }),
+            this._settings.connect('changed::weather-location', () => {
+                if (this._settings.get_boolean('show-weather'))
+                    this._fetchWeather();
+            }),
+            this._settings.connect('changed::show-weather-in-panel', () => {
+                this._updateWeatherPanelLabel();
+            }),
+        ];
+
+        // Fetch weather now and every 10 minutes
+        if (this._settings.get_boolean('show-weather'))
+            this._fetchWeather();
+
+        this._weatherTimerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 600, () => {
+            if (this._settings.get_boolean('show-weather'))
+                this._fetchWeather();
+            return GLib.SOURCE_CONTINUE;
+        });
     }
 
     _updateUnitMarkers() {
@@ -245,14 +302,129 @@ class NetSpeedIndicator extends PanelMenu.Button {
         this._trackingSinceItem.label.text = `Since: ${sinceDate || 'N/A'}`;
     }
 
+    _getWeatherEmoji(code) {
+        // WMO weather codes to emoji mapping
+        let c = parseInt(code);
+        if (c === 113) return '\u2600\uFE0F';       // Sunny
+        if (c === 116) return '\u26C5';              // Partly cloudy
+        if (c === 119 || c === 122) return '\u2601\uFE0F'; // Cloudy/Overcast
+        if ([143, 248, 260].includes(c)) return '\uD83C\uDF2B\uFE0F'; // Fog
+        if ([176, 263, 266, 293, 296, 299, 302, 305, 308, 353, 356, 359].includes(c))
+            return '\uD83C\uDF27\uFE0F';            // Rain
+        if ([179, 182, 185, 227, 230, 320, 323, 326, 329, 332, 335, 338, 362, 365, 368, 371, 374, 377].includes(c))
+            return '\u2744\uFE0F';                   // Snow
+        if ([200, 386, 389, 392, 395].includes(c))
+            return '\u26A1';                         // Thunder
+        return '\uD83C\uDF24\uFE0F';                // Default
+    }
+
+    _getConditionText(code) {
+        let c = parseInt(code);
+        if (c === 113) return 'Sunny';
+        if (c === 116) return 'Partly Cloudy';
+        if (c === 119) return 'Cloudy';
+        if (c === 122) return 'Overcast';
+        if ([143, 248, 260].includes(c)) return 'Foggy';
+        if ([176, 263, 266, 293, 296].includes(c)) return 'Light Rain';
+        if ([299, 302, 305, 308, 353, 356, 359].includes(c)) return 'Rain';
+        if ([179, 323, 326].includes(c)) return 'Light Snow';
+        if ([227, 230, 329, 332, 335, 338].includes(c)) return 'Snow';
+        if ([182, 185, 311, 314, 317, 320, 362, 365, 368, 371, 374, 377].includes(c)) return 'Sleet';
+        if ([200, 386, 389, 392, 395].includes(c)) return 'Thunderstorm';
+        return 'Unknown';
+    }
+
+    _updateWeatherVisibility() {
+        let show = this._settings.get_boolean('show-weather');
+        this._weatherHeaderItem.visible = show;
+        this._weatherTempItem.visible = show;
+        this._weatherCondItem.visible = show;
+        this._weatherHumidityItem.visible = show;
+        this._updateWeatherPanelLabel();
+    }
+
+    _updateWeatherPanelLabel() {
+        let show = this._settings.get_boolean('show-weather') &&
+                   this._settings.get_boolean('show-weather-in-panel');
+        this._weatherLabel.visible = show;
+        if (show && this._weatherText)
+            this._weatherLabel.text = this._weatherText;
+    }
+
+    _fetchWeather() {
+        let location = this._settings.get_string('weather-location').trim();
+        if (!location) {
+            this._weatherHeaderItem.label.text = 'Weather: Set location in Preferences';
+            this._weatherTempItem.visible = false;
+            this._weatherCondItem.visible = false;
+            this._weatherHumidityItem.visible = false;
+            this._weatherLabel.text = '';
+            this._weatherText = '';
+            return;
+        }
+
+        if (!this._soupSession)
+            this._soupSession = new Soup.Session();
+
+        let encodedLocation = encodeURIComponent(location);
+        let url = `https://wttr.in/${encodedLocation}?format=j1`;
+        let message = Soup.Message.new('GET', url);
+        message.get_request_headers().append('User-Agent', 'gnome-shell-extension');
+
+        this._soupSession.send_and_read_async(message, GLib.PRIORITY_DEFAULT, null, (session, result) => {
+            try {
+                let bytes = session.send_and_read_finish(result);
+                if (message.get_status() !== Soup.Status.OK) {
+                    this._weatherHeaderItem.label.text = 'Weather: Error fetching data';
+                    return;
+                }
+
+                let data = JSON.parse(new TextDecoder().decode(bytes.get_data()));
+                let current = data.current_condition[0];
+                let tempC = current.temp_C;
+                let tempF = current.temp_F;
+                let weatherCode = current.weatherCode;
+                let humidity = current.humidity;
+                let emoji = this._getWeatherEmoji(weatherCode);
+                let condition = this._getConditionText(weatherCode);
+                let areaName = data.nearest_area[0].areaName[0].value;
+
+                this._weatherHeaderItem.label.text = `${emoji} Weather: ${areaName}`;
+                this._weatherTempItem.label.text = `\uD83C\uDF21\uFE0F Temperature: ${tempC}°C / ${tempF}°F`;
+                this._weatherCondItem.label.text = `${emoji} Condition: ${condition}`;
+                this._weatherHumidityItem.label.text = `\uD83D\uDCA7 Humidity: ${humidity}%`;
+                this._weatherTempItem.visible = true;
+                this._weatherCondItem.visible = true;
+                this._weatherHumidityItem.visible = true;
+
+                this._weatherText = `${emoji}${tempC}°C`;
+                this._updateWeatherPanelLabel();
+            } catch (e) {
+                this._weatherHeaderItem.label.text = `Weather: Error - ${e.message}`;
+            }
+        });
+    }
+
     destroy() {
         if (this._timerId) {
             GLib.source_remove(this._timerId);
             this._timerId = null;
         }
+        if (this._weatherTimerId) {
+            GLib.source_remove(this._weatherTimerId);
+            this._weatherTimerId = null;
+        }
         if (this._settingsChangedId) {
             this._settings.disconnect(this._settingsChangedId);
             this._settingsChangedId = null;
+        }
+        if (this._weatherSettingsIds) {
+            this._weatherSettingsIds.forEach(id => this._settings.disconnect(id));
+            this._weatherSettingsIds = null;
+        }
+        if (this._soupSession) {
+            this._soupSession.abort();
+            this._soupSession = null;
         }
         super.destroy();
     }

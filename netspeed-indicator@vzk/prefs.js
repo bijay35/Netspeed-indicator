@@ -153,5 +153,50 @@ export default class NetSpeedPreferences extends ExtensionPreferences {
             subtitle: sinceDate || 'N/A',
         });
         infoGroup.add(sinceRow);
+
+        // -- Weather Page --
+        const weatherPage = new Adw.PreferencesPage({
+            title: 'Weather',
+            icon_name: 'weather-few-clouds-symbolic',
+        });
+        window.add(weatherPage);
+
+        const weatherGroup = new Adw.PreferencesGroup({
+            title: 'Weather Settings',
+            description: 'Show current weather info using wttr.in (no API key needed)',
+        });
+        weatherPage.add(weatherGroup);
+
+        // Enable weather
+        const showWeatherRow = new Adw.SwitchRow({
+            title: 'Show Weather',
+            subtitle: 'Enable weather display in menu and panel',
+        });
+        settings.bind('show-weather', showWeatherRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        weatherGroup.add(showWeatherRow);
+
+        // Show in panel
+        const weatherPanelRow = new Adw.SwitchRow({
+            title: 'Show in Top Bar',
+            subtitle: 'Display weather info next to network speed',
+        });
+        settings.bind('show-weather-in-panel', weatherPanelRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        weatherGroup.add(weatherPanelRow);
+
+        // Location entry
+        const locationRow = new Adw.EntryRow({
+            title: 'Location',
+            text: settings.get_string('weather-location'),
+        });
+        locationRow.connect('changed', () => {
+            settings.set_string('weather-location', locationRow.get_text());
+        });
+        weatherGroup.add(locationRow);
+
+        const hintGroup = new Adw.PreferencesGroup({
+            title: 'Examples',
+            description: 'Enter a city name like: London, New York, Tokyo, Kathmandu',
+        });
+        weatherPage.add(hintGroup);
     }
 }

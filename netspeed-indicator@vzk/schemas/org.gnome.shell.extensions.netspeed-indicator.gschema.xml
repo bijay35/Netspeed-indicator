@@ -54,5 +54,21 @@
       <summary>Day of month to reset data usage</summary>
     </key>
 
+    <key name="show-weather" type="b">
+      <default>false</default>
+      <summary>Show weather in panel and menu</summary>
+    </key>
+
+    <key name="weather-location" type="s">
+      <default>''</default>
+      <summary>Weather location (city name)</summary>
+      <description>City name for weather lookup, e.g. 'London', 'New York', 'Tokyo'</description>
+    </key>
+
+    <key name="show-weather-in-panel" type="b">
+      <default>true</default>
+      <summary>Show weather info in the top bar</summary>
+    </key>
+
   </schema>
 </schemalist>
