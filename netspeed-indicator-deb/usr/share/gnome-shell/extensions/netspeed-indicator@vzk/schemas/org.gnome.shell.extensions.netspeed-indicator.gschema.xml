@@ -70,5 +70,33 @@
       <summary>Show weather info in the top bar</summary>
     </key>
 
+    <key name="show-dual-time" type="b">
+      <default>false</default>
+      <summary>Enable world clock display</summary>
+    </key>
+
+    <key name="timezone-locations" type="as">
+      <default>[]</default>
+      <summary>List of timezone identifiers</summary>
+      <description>IANA timezone IDs, e.g. 'America/New_York', 'Europe/London'. Max 5.</description>
+    </key>
+
+    <key name="default-timezone-index" type="i">
+      <default>0</default>
+      <summary>Index of the default timezone shown in the top bar</summary>
+    </key>
+
+    <key name="temperature-unit" type="s">
+      <default>'celsius'</default>
+      <summary>Temperature display unit</summary>
+      <description>Options: 'celsius', 'fahrenheit'</description>
+    </key>
+
+    <key name="clock-format" type="s">
+      <default>'24h'</default>
+      <summary>Clock display format</summary>
+      <description>Options: '12h', '24h'</description>
+    </key>
+
   </schema>
 </schemalist>

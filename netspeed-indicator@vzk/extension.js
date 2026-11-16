@@ -47,45 +47,58 @@ class NetSpeedIndicator extends PanelMenu.Button {
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // Data usage section
+        // Data usage section (collapsible)
+        this._dataSubMenu = new PopupMenu.PopupSubMenuMenuItem('\uD83D\uDCCA Data Usage');
+        this.menu.addMenuItem(this._dataSubMenu);
+
         this._dataUsedItem = new PopupMenu.PopupMenuItem('Data Used: ---');
         this._dataUsedItem.sensitive = false;
-        this.menu.addMenuItem(this._dataUsedItem);
+        this._dataSubMenu.menu.addMenuItem(this._dataUsedItem);
 
         this._dataUpItem = new PopupMenu.PopupMenuItem('Uploaded: ---');
         this._dataUpItem.sensitive = false;
-        this.menu.addMenuItem(this._dataUpItem);
+        this._dataSubMenu.menu.addMenuItem(this._dataUpItem);
 
         this._dataDownItem = new PopupMenu.PopupMenuItem('Downloaded: ---');
         this._dataDownItem.sensitive = false;
-        this.menu.addMenuItem(this._dataDownItem);
+        this._dataSubMenu.menu.addMenuItem(this._dataDownItem);
 
         this._trackingSinceItem = new PopupMenu.PopupMenuItem('Since: ---');
         this._trackingSinceItem.sensitive = false;
-        this.menu.addMenuItem(this._trackingSinceItem);
+        this._dataSubMenu.menu.addMenuItem(this._trackingSinceItem);
 
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        // Weather section (collapsible)
+        this._weatherSubMenu = new PopupMenu.PopupSubMenuMenuItem('\u2600\uFE0F Weather');
+        this.menu.addMenuItem(this._weatherSubMenu);
 
-        // Weather section
         this._weatherHeaderItem = new PopupMenu.PopupMenuItem('Weather: ---');
         this._weatherHeaderItem.sensitive = false;
-        this.menu.addMenuItem(this._weatherHeaderItem);
+        this._weatherSubMenu.menu.addMenuItem(this._weatherHeaderItem);
 
         this._weatherTempItem = new PopupMenu.PopupMenuItem('Temperature: ---');
         this._weatherTempItem.sensitive = false;
-        this.menu.addMenuItem(this._weatherTempItem);
+        this._weatherSubMenu.menu.addMenuItem(this._weatherTempItem);
 
         this._weatherCondItem = new PopupMenu.PopupMenuItem('Condition: ---');
         this._weatherCondItem.sensitive = false;
-        this.menu.addMenuItem(this._weatherCondItem);
+        this._weatherSubMenu.menu.addMenuItem(this._weatherCondItem);
 
         this._weatherHumidityItem = new PopupMenu.PopupMenuItem('Humidity: ---');
         this._weatherHumidityItem.sensitive = false;
-        this.menu.addMenuItem(this._weatherHumidityItem);
+        this._weatherSubMenu.menu.addMenuItem(this._weatherHumidityItem);
+
+        this._weatherLastRefreshedItem = new PopupMenu.PopupMenuItem('\uD83D\uDD52 Last refreshed: ---');
+        this._weatherLastRefreshedItem.sensitive = false;
+        this._weatherSubMenu.menu.addMenuItem(this._weatherLastRefreshedItem);
 
         this._refreshWeatherItem = new PopupMenu.PopupMenuItem('\uD83D\uDD04 Refresh Weather');
         this._refreshWeatherItem.connect('activate', () => this._fetchWeather());
-        this.menu.addMenuItem(this._refreshWeatherItem);
+        this._weatherSubMenu.menu.addMenuItem(this._refreshWeatherItem);
+
+        // World Clock section (collapsible)
+        this._timezoneSubMenu = new PopupMenu.PopupSubMenuMenuItem('\uD83D\uDD70\uFE0F World Clock');
+        this.menu.addMenuItem(this._timezoneSubMenu);
+        this._updateTimezoneMenu();
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
@@ -139,6 +152,28 @@ class NetSpeedIndicator extends PanelMenu.Button {
         });
         this._updateUnitMarkers();
 
+        // World Clock setup
+        this._updateTimezoneVisibility();
+        this._timezoneSettingsIds = [
+            this._settings.connect('changed::show-dual-time', () => {
+                this._updateTimezoneVisibility();
+                this._updateTimezoneMenu();
+            }),
+            this._settings.connect('changed::timezone-locations', () => {
+                this._updateTimezoneMenu();
+            }),
+            this._settings.connect('changed::default-timezone-index', () => {
+                this._updateTimezoneMenu();
+            }),
+        ];
+
+        // Start 1-minute timer for clock updates
+        this._clockTimerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 30, () => {
+            if (this._settings.get_boolean('show-dual-time'))
+                this._updateTimezoneMenu();
+            return GLib.SOURCE_CONTINUE;
+        });
+
         // Weather setup
         this._updateWeatherVisibility();
         this._weatherSettingsIds = [
@@ -153,6 +188,10 @@ class NetSpeedIndicator extends PanelMenu.Button {
             }),
             this._settings.connect('changed::show-weather-in-panel', () => {
                 // Panel label updates on next speed refresh cycle
+            }),
+            this._settings.connect('changed::temperature-unit', () => {
+                if (this._settings.get_boolean('show-weather'))
+                    this._fetchWeather();
             }),
         ];
 
@@ -277,17 +316,28 @@ class NetSpeedIndicator extends PanelMenu.Button {
         let showUp = this._settings.get_boolean('show-upload');
         let showDown = this._settings.get_boolean('show-download');
 
-        let labelParts = [];
-        if (showDown) labelParts.push(`\u2193${downStr}`);
-        if (showUp) labelParts.push(`\u2191${upStr}`);
+        let speedParts = [];
+        if (showDown) speedParts.push(`\u2193${downStr}`);
+        if (showUp) speedParts.push(`\u2191${upStr}`);
 
-        // Append weather to the same line
+        let sections = [];
+        if (speedParts.length > 0)
+            sections.push(speedParts.join(' '));
+
+        // Append weather section
         if (this._weatherText && this._settings.get_boolean('show-weather') &&
             this._settings.get_boolean('show-weather-in-panel')) {
-            labelParts.push(this._weatherText);
+            sections.push(this._weatherText);
         }
 
-        this._label.text = labelParts.join(' ') || '---';
+        // Append default timezone
+        if (this._settings.get_boolean('show-dual-time')) {
+            let tzText = this._getDefaultTimezoneText();
+            if (tzText)
+                sections.push(tzText);
+        }
+
+        this._label.text = sections.join(' | ') || '---';
 
         // Update menu items
         this._downloadItem.label.text = `\u2193 Download: ${downStr}`;
@@ -338,22 +388,87 @@ class NetSpeedIndicator extends PanelMenu.Button {
         return 'Unknown';
     }
 
+    _getTimezoneLabel(tzId) {
+        // Return a short label from the timezone ID (e.g. "America/New_York" -> "New York")
+        let parts = tzId.split('/');
+        let city = parts[parts.length - 1].replace(/_/g, ' ');
+        return city;
+    }
+
+    _formatTimeForTz(tzId) {
+        try {
+            let tz = GLib.TimeZone.new_identifier(tzId);
+            if (!tz) return null;
+            let dt = GLib.DateTime.new_now(tz);
+            if (!dt) return null;
+            let fmt = this._settings.get_string('clock-format') === '12h' ? '%I:%M %p' : '%H:%M';
+            return dt.format(fmt);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    _getDefaultTimezoneText() {
+        let locations = this._settings.get_strv('timezone-locations');
+        if (locations.length === 0) return null;
+
+        let idx = this._settings.get_int('default-timezone-index');
+        if (idx < 0 || idx >= locations.length) idx = 0;
+
+        let tzId = locations[idx];
+        let time = this._formatTimeForTz(tzId);
+        if (!time) return null;
+
+        let label = this._getTimezoneLabel(tzId);
+        return `\uD83D\uDD70\uFE0F ${time} ${label}`;
+    }
+
+    _updateTimezoneVisibility() {
+        let show = this._settings.get_boolean('show-dual-time');
+        this._timezoneSubMenu.visible = show;
+    }
+
+    _updateTimezoneMenu() {
+        this._timezoneSubMenu.menu.removeAll();
+
+        let locations = this._settings.get_strv('timezone-locations');
+        let defaultIdx = this._settings.get_int('default-timezone-index');
+        if (defaultIdx < 0 || defaultIdx >= locations.length) defaultIdx = 0;
+
+        if (locations.length === 0) {
+            let emptyItem = new PopupMenu.PopupMenuItem('No timezones added. Use Preferences to add.');
+            emptyItem.sensitive = false;
+            this._timezoneSubMenu.menu.addMenuItem(emptyItem);
+            return;
+        }
+
+        for (let i = 0; i < locations.length; i++) {
+            let tzId = locations[i];
+            let time = this._formatTimeForTz(tzId);
+            let label = this._getTimezoneLabel(tzId);
+            let prefix = (i === defaultIdx) ? '\u2605 ' : '  ';
+            let timeStr = time || '--:--';
+
+            let item = new PopupMenu.PopupMenuItem(`${prefix}${timeStr}  ${label}`);
+            item.sensitive = false;
+            this._timezoneSubMenu.menu.addMenuItem(item);
+        }
+    }
+
     _updateWeatherVisibility() {
         let show = this._settings.get_boolean('show-weather');
-        this._weatherHeaderItem.visible = show;
-        this._weatherTempItem.visible = show;
-        this._weatherCondItem.visible = show;
-        this._weatherHumidityItem.visible = show;
-        this._refreshWeatherItem.visible = show;
+        this._weatherSubMenu.visible = show;
     }
 
     _fetchWeather() {
         let location = this._settings.get_string('weather-location').trim();
         if (!location) {
-            this._weatherHeaderItem.label.text = 'Weather: Set location in Preferences';
+            this._weatherHeaderItem.label.text = 'Set location in Preferences';
             this._weatherTempItem.visible = false;
             this._weatherCondItem.visible = false;
             this._weatherHumidityItem.visible = false;
+            this._refreshWeatherItem.visible = false;
+            this._weatherLastRefreshedItem.visible = false;
             this._weatherText = '';
             return;
         }
@@ -385,15 +500,23 @@ class NetSpeedIndicator extends PanelMenu.Button {
                 let condition = this._getConditionText(weatherCode);
                 let areaName = data.nearest_area[0].areaName[0].value;
 
+                let useCelsius = this._settings.get_string('temperature-unit') === 'celsius';
+                let tempDisplay = useCelsius ? `${tempC}°C` : `${tempF}°F`;
+
                 this._weatherHeaderItem.label.text = `${emoji} Weather: ${areaName}`;
-                this._weatherTempItem.label.text = `\uD83C\uDF21\uFE0F Temperature: ${tempC}°C / ${tempF}°F`;
+                this._weatherTempItem.label.text = `\uD83C\uDF21\uFE0F Temperature: ${tempDisplay}`;
                 this._weatherCondItem.label.text = `${emoji} Condition: ${condition}`;
                 this._weatherHumidityItem.label.text = `\uD83D\uDCA7 Humidity: ${humidity}%`;
                 this._weatherTempItem.visible = true;
                 this._weatherCondItem.visible = true;
                 this._weatherHumidityItem.visible = true;
+                this._refreshWeatherItem.visible = true;
+                this._weatherLastRefreshedItem.visible = true;
 
-                this._weatherText = `${emoji}${tempC}°C ${condition}`;
+                let now = GLib.DateTime.new_now_local();
+                this._weatherLastRefreshedItem.label.text = `\uD83D\uDD52 Last refreshed: ${now.format('%H:%M:%S')}`;
+
+                this._weatherText = `${emoji}${tempDisplay} ${condition}`;
             } catch (e) {
                 this._weatherHeaderItem.label.text = `Weather: Error - ${e.message}`;
             }
@@ -405,6 +528,10 @@ class NetSpeedIndicator extends PanelMenu.Button {
             GLib.source_remove(this._timerId);
             this._timerId = null;
         }
+        if (this._clockTimerId) {
+            GLib.source_remove(this._clockTimerId);
+            this._clockTimerId = null;
+        }
         if (this._weatherTimerId) {
             GLib.source_remove(this._weatherTimerId);
             this._weatherTimerId = null;
@@ -412,6 +539,10 @@ class NetSpeedIndicator extends PanelMenu.Button {
         if (this._settingsChangedId) {
             this._settings.disconnect(this._settingsChangedId);
             this._settingsChangedId = null;
+        }
+        if (this._timezoneSettingsIds) {
+            this._timezoneSettingsIds.forEach(id => this._settings.disconnect(id));
+            this._timezoneSettingsIds = null;
         }
         if (this._weatherSettingsIds) {
             this._weatherSettingsIds.forEach(id => this._settings.disconnect(id));

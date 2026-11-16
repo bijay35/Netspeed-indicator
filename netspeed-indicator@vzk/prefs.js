@@ -1,3 +1,4 @@
+import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
@@ -175,6 +176,24 @@ export default class NetSpeedPreferences extends ExtensionPreferences {
         settings.bind('show-weather', showWeatherRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         weatherGroup.add(showWeatherRow);
 
+        // Temperature unit
+        const tempUnitRow = new Adw.ComboRow({
+            title: 'Temperature Unit',
+            subtitle: 'Choose Celsius or Fahrenheit',
+        });
+        const tempUnitModel = new Gtk.StringList();
+        tempUnitModel.append('Celsius (°C)');
+        tempUnitModel.append('Fahrenheit (°F)');
+        tempUnitRow.set_model(tempUnitModel);
+
+        const tempUnitMap = ['celsius', 'fahrenheit'];
+        let currentTempUnit = settings.get_string('temperature-unit');
+        tempUnitRow.set_selected(tempUnitMap.indexOf(currentTempUnit));
+        tempUnitRow.connect('notify::selected', () => {
+            settings.set_string('temperature-unit', tempUnitMap[tempUnitRow.get_selected()]);
+        });
+        weatherGroup.add(tempUnitRow);
+
         // Show in panel
         const weatherPanelRow = new Adw.SwitchRow({
             title: 'Show in Top Bar',
@@ -198,5 +217,186 @@ export default class NetSpeedPreferences extends ExtensionPreferences {
             description: 'Enter a city name like: London, New York, Tokyo, Kathmandu',
         });
         weatherPage.add(hintGroup);
+
+        // -- World Clock Page --
+        const clockPage = new Adw.PreferencesPage({
+            title: 'World Clock',
+            icon_name: 'preferences-system-time-symbolic',
+        });
+        window.add(clockPage);
+
+        const clockGroup = new Adw.PreferencesGroup({
+            title: 'World Clock Settings',
+            description: 'Show times from different timezones',
+        });
+        clockPage.add(clockGroup);
+
+        // Enable world clock
+        const showClockRow = new Adw.SwitchRow({
+            title: 'Enable World Clock',
+            subtitle: 'Show timezone info in panel and dropdown',
+        });
+        settings.bind('show-dual-time', showClockRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        clockGroup.add(showClockRow);
+
+        // Clock format
+        const clockFormatRow = new Adw.ComboRow({
+            title: 'Clock Format',
+            subtitle: 'Choose 12-hour or 24-hour display',
+        });
+        const clockFormatModel = new Gtk.StringList();
+        clockFormatModel.append('24-hour (14:30)');
+        clockFormatModel.append('12-hour (2:30 PM)');
+        clockFormatRow.set_model(clockFormatModel);
+
+        const clockFormatMap = ['24h', '12h'];
+        let currentFormat = settings.get_string('clock-format');
+        clockFormatRow.set_selected(clockFormatMap.indexOf(currentFormat));
+        clockFormatRow.connect('notify::selected', () => {
+            settings.set_string('clock-format', clockFormatMap[clockFormatRow.get_selected()]);
+        });
+        clockGroup.add(clockFormatRow);
+
+        // Default timezone selector
+        const defaultTzRow = new Adw.ComboRow({
+            title: 'Default Timezone',
+            subtitle: 'Shown in the top bar beside weather',
+        });
+        clockGroup.add(defaultTzRow);
+
+        // Timezone list group
+        const tzListGroup = new Adw.PreferencesGroup({
+            title: 'Timezones',
+            description: 'Add up to 5 timezones (IANA format)',
+        });
+        clockPage.add(tzListGroup);
+
+        // Helper to get short label from tz ID
+        const getTzLabel = (tzId) => {
+            let parts = tzId.split('/');
+            return parts[parts.length - 1].replace(/_/g, ' ');
+        };
+
+        // Helper to rebuild the timezone list UI
+        const rebuildTzList = () => {
+            // Clear existing rows from the list group (keep only the add row at the end)
+            let locations = settings.get_strv('timezone-locations');
+
+            // Remove all dynamic rows
+            if (this._tzRows) {
+                this._tzRows.forEach(row => tzListGroup.remove(row));
+            }
+            this._tzRows = [];
+
+            for (let i = 0; i < locations.length; i++) {
+                let tzId = locations[i];
+                let row = new Adw.ActionRow({
+                    title: getTzLabel(tzId),
+                    subtitle: tzId,
+                });
+
+                let removeBtn = new Gtk.Button({
+                    icon_name: 'list-remove-symbolic',
+                    valign: Gtk.Align.CENTER,
+                    css_classes: ['flat'],
+                });
+                removeBtn.connect('clicked', () => {
+                    let locs = settings.get_strv('timezone-locations');
+                    let idx = locs.indexOf(tzId);
+                    if (idx !== -1) {
+                        locs.splice(idx, 1);
+                        settings.set_strv('timezone-locations', locs);
+                        // Adjust default index if needed
+                        let defIdx = settings.get_int('default-timezone-index');
+                        if (defIdx >= locs.length && locs.length > 0)
+                            settings.set_int('default-timezone-index', locs.length - 1);
+                        else if (locs.length === 0)
+                            settings.set_int('default-timezone-index', 0);
+                        rebuildTzList();
+                        rebuildDefaultCombo();
+                    }
+                });
+                row.add_suffix(removeBtn);
+                tzListGroup.add(row);
+                this._tzRows.push(row);
+            }
+        };
+
+        // Helper to rebuild the default timezone combo
+        const rebuildDefaultCombo = () => {
+            let locations = settings.get_strv('timezone-locations');
+            let model = new Gtk.StringList();
+            for (let tz of locations) {
+                model.append(getTzLabel(tz));
+            }
+            defaultTzRow.set_model(model);
+            if (locations.length > 0) {
+                let idx = settings.get_int('default-timezone-index');
+                if (idx < 0 || idx >= locations.length) idx = 0;
+                defaultTzRow.set_selected(idx);
+            }
+        };
+
+        defaultTzRow.connect('notify::selected', () => {
+            let locations = settings.get_strv('timezone-locations');
+            let sel = defaultTzRow.get_selected();
+            if (sel >= 0 && sel < locations.length) {
+                settings.set_int('default-timezone-index', sel);
+            }
+        });
+
+        // Add timezone row
+        const addTzGroup = new Adw.PreferencesGroup({
+            title: 'Add Timezone',
+        });
+        clockPage.add(addTzGroup);
+
+        const addTzEntry = new Adw.EntryRow({
+            title: 'Timezone ID',
+        });
+        addTzGroup.add(addTzEntry);
+
+        const addTzBtn = new Adw.ActionRow({
+            title: 'Add Timezone',
+            activatable: true,
+        });
+        addTzBtn.add_suffix(new Gtk.Image({
+            icon_name: 'list-add-symbolic',
+            valign: Gtk.Align.CENTER,
+        }));
+        addTzBtn.connect('activated', () => {
+            let tzId = addTzEntry.get_text().trim();
+            if (!tzId) return;
+
+            let locations = settings.get_strv('timezone-locations');
+            if (locations.length >= 5) return;
+            if (locations.includes(tzId)) return;
+
+            // Validate timezone
+            try {
+                let tz = GLib.TimeZone.new_identifier(tzId);
+                let dt = GLib.DateTime.new_now(tz);
+                if (!dt) return;
+            } catch (e) {
+                return;
+            }
+
+            locations.push(tzId);
+            settings.set_strv('timezone-locations', locations);
+            addTzEntry.set_text('');
+            rebuildTzList();
+            rebuildDefaultCombo();
+        });
+        addTzGroup.add(addTzBtn);
+
+        const tzHintGroup = new Adw.PreferencesGroup({
+            title: 'Examples',
+            description: 'Use IANA timezone IDs: America/New_York, Europe/London, Asia/Tokyo, Asia/Kathmandu, Australia/Sydney',
+        });
+        clockPage.add(tzHintGroup);
+
+        // Initial build
+        rebuildTzList();
+        rebuildDefaultCombo();
     }
 }
