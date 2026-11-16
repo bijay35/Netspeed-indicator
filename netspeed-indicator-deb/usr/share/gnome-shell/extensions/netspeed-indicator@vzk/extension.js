@@ -108,9 +108,12 @@ class NetSpeedIndicator extends PanelMenu.Button {
         this._unitKbps = new PopupMenu.PopupMenuItem('  KB/s');
         this._unitMbps = new PopupMenu.PopupMenuItem('  MB/s');
 
-        this._unitAdaptive.connect('activate', () => this._settings.set_string('speed-unit', 'adaptive'));
-        this._unitKbps.connect('activate', () => this._settings.set_string('speed-unit', 'kbps'));
-        this._unitMbps.connect('activate', () => this._settings.set_string('speed-unit', 'mbps'));
+        this._unitSignalIds = [];
+        this._unitSignalIds.push(
+            this._unitAdaptive.connect('activate', () => this._settings.set_string('speed-unit', 'adaptive')),
+            this._unitKbps.connect('activate', () => this._settings.set_string('speed-unit', 'kbps')),
+            this._unitMbps.connect('activate', () => this._settings.set_string('speed-unit', 'mbps')),
+        );
 
         unitMenu.menu.addMenuItem(this._unitAdaptive);
         unitMenu.menu.addMenuItem(this._unitKbps);
@@ -135,17 +138,20 @@ class NetSpeedIndicator extends PanelMenu.Button {
         // Check monthly reset
         this._checkMonthlyReset();
 
-        // Read initial network bytes
-        [this._prevRxBytes, this._prevTxBytes] = this._getNetworkBytes();
+        // Read initial network bytes, then start update loop
         this._prevTime = GLib.get_monotonic_time();
+        this._readNetworkBytesAsync((rx, tx) => {
+            this._prevRxBytes = rx;
+            this._prevTxBytes = tx;
+            this._prevTime = GLib.get_monotonic_time();
 
-        // Start update loop
-        this._timerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,
-            this._settings.get_int('refresh-interval'),
-            () => {
-                this._update();
-                return GLib.SOURCE_CONTINUE;
-            });
+            this._timerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,
+                this._settings.get_int('refresh-interval'),
+                () => {
+                    this._update();
+                    return GLib.SOURCE_CONTINUE;
+                });
+        });
 
         this._settingsChangedId = this._settings.connect('changed::speed-unit', () => {
             this._updateUnitMarkers();
@@ -213,27 +219,33 @@ class NetSpeedIndicator extends PanelMenu.Button {
         this._unitMbps.label.text = (unit === 'mbps' ? '> ' : '  ') + 'MB/s';
     }
 
-    _getNetworkBytes() {
-        let rx = 0, tx = 0;
-        try {
-            let [ok, contents] = GLib.file_get_contents('/proc/net/dev');
-            if (!ok) return [0, 0];
+    _readNetworkBytesAsync(callback) {
+        let file = Gio.File.new_for_path('/proc/net/dev');
+        file.load_contents_async(null, (source, result) => {
+            let rx = 0, tx = 0;
+            try {
+                let [ok, contents] = source.load_contents_finish(result);
+                if (!ok) {
+                    callback(0, 0);
+                    return;
+                }
 
-            let lines = new TextDecoder().decode(contents).split('\n');
-            for (let i = 2; i < lines.length; i++) {
-                let line = lines[i].trim();
-                if (line === '' || line.startsWith('lo:')) continue;
+                let lines = new TextDecoder().decode(contents).split('\n');
+                for (let i = 2; i < lines.length; i++) {
+                    let line = lines[i].trim();
+                    if (line === '' || line.startsWith('lo:')) continue;
 
-                let parts = line.split(/\s+/);
-                if (parts.length < 10) continue;
+                    let parts = line.split(/\s+/);
+                    if (parts.length < 10) continue;
 
-                rx += parseInt(parts[1]) || 0;
-                tx += parseInt(parts[9]) || 0;
+                    rx += parseInt(parts[1]) || 0;
+                    tx += parseInt(parts[9]) || 0;
+                }
+            } catch (e) {
+                // ignore
             }
-        } catch (e) {
-            // ignore
-        }
-        return [rx, tx];
+            callback(rx, tx);
+        });
     }
 
     _formatSpeed(bytesPerSec) {
@@ -280,80 +292,81 @@ class NetSpeedIndicator extends PanelMenu.Button {
     }
 
     _update() {
-        let now = GLib.get_monotonic_time();
-        let [rxBytes, txBytes] = this._getNetworkBytes();
+        this._readNetworkBytesAsync((rxBytes, txBytes) => {
+            let now = GLib.get_monotonic_time();
 
-        let elapsed = (now - this._prevTime) / 1000000; // microseconds to seconds
-        if (elapsed <= 0) elapsed = 1;
+            let elapsed = (now - this._prevTime) / 1000000; // microseconds to seconds
+            if (elapsed <= 0) elapsed = 1;
 
-        let rxSpeed = (rxBytes - this._prevRxBytes) / elapsed;
-        let txSpeed = (txBytes - this._prevTxBytes) / elapsed;
+            let rxSpeed = (rxBytes - this._prevRxBytes) / elapsed;
+            let txSpeed = (txBytes - this._prevTxBytes) / elapsed;
 
-        // Avoid negative speeds on counter reset
-        if (rxSpeed < 0) rxSpeed = 0;
-        if (txSpeed < 0) txSpeed = 0;
+            // Avoid negative speeds on counter reset
+            if (rxSpeed < 0) rxSpeed = 0;
+            if (txSpeed < 0) txSpeed = 0;
 
-        // Update data usage tracking
-        let rxDelta = rxBytes - this._prevRxBytes;
-        let txDelta = txBytes - this._prevTxBytes;
-        if (rxDelta > 0) {
-            let prev = this._settings.get_value('total-bytes-downloaded').get_int64();
-            this._settings.set_value('total-bytes-downloaded', GLib.Variant.new_int64(prev + rxDelta));
-        }
-        if (txDelta > 0) {
-            let prev = this._settings.get_value('total-bytes-uploaded').get_int64();
-            this._settings.set_value('total-bytes-uploaded', GLib.Variant.new_int64(prev + txDelta));
-        }
+            // Update data usage tracking
+            let rxDelta = rxBytes - this._prevRxBytes;
+            let txDelta = txBytes - this._prevTxBytes;
+            if (rxDelta > 0) {
+                let prev = this._settings.get_value('total-bytes-downloaded').get_int64();
+                this._settings.set_value('total-bytes-downloaded', GLib.Variant.new_int64(prev + rxDelta));
+            }
+            if (txDelta > 0) {
+                let prev = this._settings.get_value('total-bytes-uploaded').get_int64();
+                this._settings.set_value('total-bytes-uploaded', GLib.Variant.new_int64(prev + txDelta));
+            }
 
-        this._prevRxBytes = rxBytes;
-        this._prevTxBytes = txBytes;
-        this._prevTime = now;
+            this._prevRxBytes = rxBytes;
+            this._prevTxBytes = txBytes;
+            this._prevTime = now;
 
-        // Update panel label
-        let downStr = this._formatSpeed(rxSpeed);
-        let upStr = this._formatSpeed(txSpeed);
+            // Update panel label
+            let downStr = this._formatSpeed(rxSpeed);
+            let upStr = this._formatSpeed(txSpeed);
 
-        let showUp = this._settings.get_boolean('show-upload');
-        let showDown = this._settings.get_boolean('show-download');
+            let showUp = this._settings.get_boolean('show-upload');
+            let showDown = this._settings.get_boolean('show-download');
 
-        let speedParts = [];
-        if (showDown) speedParts.push(`\u2193${downStr}`);
-        if (showUp) speedParts.push(`\u2191${upStr}`);
+            let speedParts = [];
+            if (showDown) speedParts.push(`\u2193${downStr}`);
+            if (showUp) speedParts.push(`\u2191${upStr}`);
 
-        let sections = [];
-        if (speedParts.length > 0)
-            sections.push(speedParts.join(' '));
+            let sections = [];
+            if (speedParts.length > 0)
+                sections.push(speedParts.join(' '));
 
-        // Append weather section
-        if (this._weatherText && this._settings.get_boolean('show-weather') &&
-            this._settings.get_boolean('show-weather-in-panel')) {
-            sections.push(this._weatherText);
-        }
+            // Append weather section
+            if (this._weatherText && this._settings.get_boolean('show-weather') &&
+                this._settings.get_boolean('show-weather-in-panel')) {
+                sections.push(this._weatherText);
+            }
 
-        // Append default timezone
-        if (this._settings.get_boolean('show-dual-time')) {
-            let tzText = this._getDefaultTimezoneText();
-            if (tzText)
-                sections.push(tzText);
-        }
+            // Append default timezone
+            if (this._settings.get_boolean('show-dual-time')) {
+                let tzText = this._getDefaultTimezoneText();
+                if (tzText)
+                    sections.push(tzText);
+            }
 
-        this._label.text = sections.join(' | ') || '---';
+            this._label.text = sections.join(' | ') || '---';
 
-        // Update menu items
-        this._downloadItem.label.text = `\u2193 Download: ${downStr}`;
-        this._uploadItem.label.text = `\u2191 Upload: ${upStr}`;
+            // Update menu items
+            this._downloadItem.label.text = `\u2193 Download: ${downStr}`;
+            this._uploadItem.label.text = `\u2191 Upload: ${upStr}`;
 
-        // Update data usage
-        let totalDown = this._settings.get_value('total-bytes-downloaded').get_int64();
-        let totalUp = this._settings.get_value('total-bytes-uploaded').get_int64();
-        let totalData = totalDown + totalUp;
+            // Update data usage
+            let totalDown = this._settings.get_value('total-bytes-downloaded').get_int64();
+            let totalUp = this._settings.get_value('total-bytes-uploaded').get_int64();
+            let totalData = totalDown + totalUp;
 
-        this._dataUsedItem.label.text = `Total Data: ${this._formatBytes(totalData)}`;
-        this._dataDownItem.label.text = `\u2193 Downloaded: ${this._formatBytes(totalDown)}`;
-        this._dataUpItem.label.text = `\u2191 Uploaded: ${this._formatBytes(totalUp)}`;
+            this._dataUsedItem.label.text = `Total Data: ${this._formatBytes(totalData)}`;
+            this._dataDownItem.label.text = `\u2193 Downloaded: ${this._formatBytes(totalDown)}`;
+            this._dataUpItem.label.text = `\u2191 Uploaded: ${this._formatBytes(totalUp)}`;
 
-        let sinceDate = this._settings.get_string('tracking-start-date');
-        this._trackingSinceItem.label.text = `Since: ${sinceDate || 'N/A'}`;
+            let sinceDate = this._settings.get_string('tracking-start-date');
+            this._trackingSinceItem.label.text = `Since: ${sinceDate || 'N/A'}`;
+        });
     }
 
     _getWeatherEmoji(code) {
@@ -535,6 +548,11 @@ class NetSpeedIndicator extends PanelMenu.Button {
         if (this._weatherTimerId) {
             GLib.source_remove(this._weatherTimerId);
             this._weatherTimerId = null;
+        }
+        if (this._unitSignalIds) {
+            let items = [this._unitAdaptive, this._unitKbps, this._unitMbps];
+            this._unitSignalIds.forEach((id, i) => items[i].disconnect(id));
+            this._unitSignalIds = null;
         }
         if (this._settingsChangedId) {
             this._settings.disconnect(this._settingsChangedId);
