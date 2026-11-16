@@ -1,6 +1,6 @@
 # Net Speed Indicator
 
-A GNOME Shell extension that displays real-time network upload/download speed in the top bar.
+A GNOME Shell extension that displays real-time network upload/download speed in the top bar, with optional weather display.
 
 ## Features
 
@@ -11,6 +11,11 @@ A GNOME Shell extension that displays real-time network upload/download speed in
 - Configurable refresh interval (1–10 seconds)
 - Dropdown menu with detailed speed and usage stats
 - Preferences dialog for full customization
+- Built-in weather display using [wttr.in](https://wttr.in) (no API key needed)
+  - Current temperature, condition, and humidity
+  - Optional weather info in the top bar alongside network speed
+  - Configurable city-based location
+  - Auto-refreshes every 10 minutes
 
 ## Supported GNOME Versions
 
@@ -46,6 +51,7 @@ Once enabled, the extension shows download/upload speeds in the top bar. Click o
 - Current download and upload speeds
 - Total data usage (downloaded, uploaded, combined)
 - Tracking start date
+- Current weather info (temperature, condition, humidity)
 - Speed unit selector
 - Reset data usage option
 - Preferences
@@ -67,6 +73,11 @@ gnome-extensions prefs netspeed-indicator@vzk
 - Enable/disable data usage tracking
 - Enable monthly auto-reset
 - Set the day of month to reset counters
+
+**Weather settings:**
+- Enable/disable weather display
+- Show weather in the top bar next to network speed
+- Set location by city name (e.g., London, New York, Kathmandu)
 
 ## Uninstall
 
